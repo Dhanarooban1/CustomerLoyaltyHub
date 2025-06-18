@@ -143,13 +143,24 @@ export default function AdminDashboard() {
       });
     },
   });
-
   const editCustomerMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: any }) => 
-      apiRequest("PUT", `/api/customers/${id}`, data),
+    mutationFn: ({ id, data }: { id: number; data: any }) => {
+      // Validate the ID and data before sending the request
+      if (!id || isNaN(id)) {
+        throw new Error("Invalid customer ID");
+      }
+      
+      if (!data.name || !data.phone) {
+        throw new Error("Name and phone are required");
+      }
+      
+      console.log("Updating customer with ID:", id, "Data:", data);
+      return apiRequest("PUT", `/api/customers/${id}`, data);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       setCustomerToEdit(null);
+      setShowCustomerForm(false); // Close the form after successful update
       toast({ title: "Customer updated successfully!" });
     },
     onError: (error: Error) => {
@@ -160,9 +171,14 @@ export default function AdminDashboard() {
       });
     },
   });
-
   const deleteCustomerMutation = useMutation({
-    mutationFn: (id: number) => apiRequest("DELETE", `/api/customers/${id}`),
+    mutationFn: (id: number) => {
+      // Ensure id is a valid number
+      if (typeof id !== 'number' || isNaN(id)) {
+        throw new Error("Invalid customer ID");
+      }
+      return apiRequest("DELETE", `/api/customers/${id}`);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
@@ -225,18 +241,33 @@ export default function AdminDashboard() {
     };
 
     createCampaignMutation.mutate(campaignData);
-  };
-  const handleCustomerFormSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  };  const handleCustomerFormSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     
+    const name = formData.get("name") as string;
+    const phone = formData.get("phone") as string;
+    const email = formData.get("email") as string;
+    
+    // Validate form data
+    if (!name.trim()) {
+      toast({ title: "Name is required", variant: "destructive" });
+      return;
+    }
+    
+    if (!phone.trim()) {
+      toast({ title: "Phone number is required", variant: "destructive" });
+      return;
+    }
+    
     const customerData = {
-      name: formData.get("name") as string,
-      phone: formData.get("phone") as string,
-      email: formData.get("email") as string || undefined,
+      name: name.trim(),
+      phone: phone.trim(),
+      email: email ? email.trim() : undefined,
     };
 
     if (customerToEdit) {
+      console.log("Editing customer:", customerToEdit.id, customerData);
       editCustomerMutation.mutate({
         id: customerToEdit.id,
         data: customerData
@@ -307,16 +338,21 @@ export default function AdminDashboard() {
                          submission.campaignName.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCampaign = selectedCampaign === "all" || submission.campaignId.toString() === selectedCampaign;
     return matchesSearch && matchesCampaign;
-  });
-  const handleDeleteCustomer = (id: number) => {
+  });  const handleDeleteCustomer = (id: number) => {
     if (window.confirm("Are you sure you want to delete this customer? This action cannot be undone.")) {
+      // Make sure we're deleting the specific customer with this ID
+      console.log("Deleting customer with ID:", id);
       deleteCustomerMutation.mutate(id);
     }
   };
-  
-  const handleEditCustomer = (customer: any) => {
-    setCustomerToEdit(customer);
+    const handleEditCustomer = (customer: any) => {
+    // Make a copy of the customer object to avoid reference issues
+    setCustomerToEdit({...customer});
     setShowCustomerForm(true);
+    // Scroll to the form
+    setTimeout(() => {
+      document.querySelector('.customer-form')?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
   };
 
   const closeImageModal = () => {
@@ -839,20 +875,20 @@ export default function AdminDashboard() {
             </div>
 
             {/* Customer Creation Form */}
-            {showCustomerForm && (
-              <Card className="mb-8">                <CardHeader>
-                  <CardTitle>{customerToEdit ? "Edit Customer" : "Add New Customer"}</CardTitle>
+            {showCustomerForm && (              <Card className="mb-8 customer-form">
+                <CardHeader>
+                  <CardTitle>{customerToEdit ? `Edit Customer: ${customerToEdit.name}` : "Add New Customer"}</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <form onSubmit={handleCustomerFormSubmit}>
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                      <div>
+                  <form onSubmit={handleCustomerFormSubmit} id="customerForm">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">                      <div>
                         <Label htmlFor="customer-name">Full Name</Label>
                         <Input
                           id="customer-name"
                           name="name"
                           placeholder="e.g., John Smith"
                           required
+                          key={customerToEdit ? `name-${customerToEdit.id}` : 'name-new'}
                           defaultValue={customerToEdit ? customerToEdit.name : ""}
                         />
                       </div>
@@ -864,6 +900,7 @@ export default function AdminDashboard() {
                           type="tel"
                           placeholder="e.g., +1 (555) 123-4567"
                           required
+                          key={customerToEdit ? `phone-${customerToEdit.id}` : 'phone-new'}
                           defaultValue={customerToEdit ? customerToEdit.phone : ""}
                         />
                       </div>
@@ -874,6 +911,7 @@ export default function AdminDashboard() {
                           name="email"
                           type="email"
                           placeholder="e.g., john@email.com"
+                          key={customerToEdit ? `email-${customerToEdit.id}` : 'email-new'}
                           defaultValue={customerToEdit ? customerToEdit.email || "" : ""}
                         />
                       </div>
@@ -1004,11 +1042,24 @@ export default function AdminDashboard() {
                             )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <div className="flex items-center space-x-2">
-                              <Button size="sm" variant="ghost" onClick={() => handleEditCustomer(customer)}>
+                            <div className="flex items-center space-x-2">                              <Button 
+                                size="sm" 
+                                variant="ghost" 
+                                onClick={(e) => {
+                                  e.stopPropagation(); // Prevent event bubbling
+                                  handleEditCustomer(customer);
+                                }}
+                              >
                                 <Edit size={16} />
-                              </Button>
-                              <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => handleDeleteCustomer(customer.id)}>
+                              </Button><Button 
+                                size="sm" 
+                                variant="ghost" 
+                                className="text-red-500 hover:text-red-700" 
+                                onClick={(e) => {
+                                  e.stopPropagation(); // Prevent event bubbling
+                                  handleDeleteCustomer(customer.id);
+                                }}
+                              >
                                 <Trash2 size={16} />
                               </Button>
                             </div>
